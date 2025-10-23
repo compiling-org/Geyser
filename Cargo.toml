@@ -1,0 +1,40 @@
+[package]
+name = "geyser"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance library for zero-copy GPU texture sharing across Vulkan, Metal, and WebGPU."
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Abstract common traits and error handling
+thiserror = "1.0"
+
+# Vulkan dependencies (for the vulkan backend)
+# You'll need to choose a Vulkan binding library. `ash` is a popular low-level choice.
+# feature = "all" or specific extensions might be needed for interop.
+ash = { version = "0.38", optional = true, features = ["linked"] }
+gpu-allocator = { version = "0.27", optional = true } # For memory allocation
+
+# Metal dependencies (for the metal backend)
+# `metal` crate provides direct bindings.
+metal = { version = "0.29", optional = true }
+core-graphics = { version = "0.23", optional = true } # For common CoreGraphics types
+
+# WebGPU dependencies (for the webgpu backend - future)
+# wgpu = { version = "0.19", optional = true }
+
+[dev-dependencies]
+# For testing and examples
+anyhow = "1.0" # Simple error handling in examples
+bevy = { version = "0.14", default-features = false, features = ["bevy_asset", "bevy_render", "bevy_winit", "bevy_core_pipeline", "bevy_sprite", "png", "x11"] }
+criterion = "0.5" # Benchmarking
+
+[[bench]]
+name = "texture_ops"
+harness = false
+
+[features]
+default = []
+vulkan = ["dep:ash", "dep:gpu-allocator"]
+metal = ["dep:metal", "dep:core-graphics"]
+webgpu = [] # Add ["dep:wgpu"] when starting WebGPU implementation
