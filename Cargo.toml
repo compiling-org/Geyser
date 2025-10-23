@@ -40,3 +40,4 @@ default = []
 vulkan = ["dep:ash", "dep:gpu-allocator"]
 metal = ["dep:metal", "dep:core-graphics"]
 webgpu = [] # Add ["dep:wgpu"] when starting WebGPU implementation
+bevy = [] # Enables Bevy plugin (requires bevy in dev-dependencies)

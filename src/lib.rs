@@ -12,6 +12,10 @@ pub mod metal;
 #[cfg(feature = "webgpu")]
 pub mod webgpu; // Placeholder for future WebGPU implementation
 
+// Bevy integration (optional)
+#[cfg(all(feature = "vulkan", feature = "bevy"))]
+pub mod bevy_plugin;
+
 pub use error::{GeyserError, Result};
 pub use common::{ApiTextureHandle, TextureDescriptor, TextureFormat, TextureUsage};
 
