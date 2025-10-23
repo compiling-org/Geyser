@@ -19,11 +19,41 @@ fn create_vulkan_context() -> (Arc<Instance>, Arc<Device>, vk::PhysicalDevice, u
     let entry = unsafe { Entry::load().expect("Failed to load Vulkan") };
     let app_name = CString::new("GeyserBench").unwrap();
     
-    let app_info = vk::ApplicationInfo::builder()
-        .application_name(&app_name)
-        .api_version(vk::make_api_version(0, 1, 0, 0));
+    let app_info = vk::ApplicationInfo {
+        s_type: vk::StructureType::APPLICATION_INFO,
+        p_next: std::ptr::null(),
+        p_application_name: app_name.as_ptr(),
+        application_version: 0,
+        p_engine_name: std::ptr::null(),
+        engine_version: 0,
+        api_version: vk::make_api_version(0, 1, 2, 0),
+        _marker: std::marker::PhantomData,
+    };
 
-    let create_info = vk::InstanceCreateInfo::builder().application_info(&app_info);
+    #[cfg(target_os = "windows")]
+    let extension_names = [
+        ash::khr::external_memory_capabilities::NAME.as_ptr(),
+        ash::khr::get_physical_device_properties2::NAME.as_ptr(),
+    ];
+    
+    #[cfg(target_os = "linux")]
+    let extension_names = [
+        ash::khr::external_memory_capabilities::NAME.as_ptr(),
+        ash::khr::get_physical_device_properties2::NAME.as_ptr(),
+    ];
+
+    let create_info = vk::InstanceCreateInfo {
+        s_type: vk::StructureType::INSTANCE_CREATE_INFO,
+        p_next: std::ptr::null(),
+        flags: vk::InstanceCreateFlags::empty(),
+        p_application_info: &app_info,
+        enabled_layer_count: 0,
+        pp_enabled_layer_names: std::ptr::null(),
+        enabled_extension_count: extension_names.len() as u32,
+        pp_enabled_extension_names: extension_names.as_ptr(),
+        _marker: std::marker::PhantomData,
+    };
+
     let instance = unsafe { entry.create_instance(&create_info, None).expect("Failed to create instance") };
 
     let physical_devices = unsafe { instance.enumerate_physical_devices().expect("No devices") };
@@ -43,12 +73,49 @@ fn create_vulkan_context() -> (Arc<Instance>, Arc<Device>, vk::PhysicalDevice, u
         .expect("No suitable queue family");
 
     let queue_priority = 1.0;
-    let queue_create_info = vk::DeviceQueueCreateInfo::builder()
-        .queue_family_index(queue_family_index)
-        .queue_priorities(&[queue_priority]);
+    let queue_create_info = vk::DeviceQueueCreateInfo {
+        s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
+        p_next: std::ptr::null(),
+        flags: vk::DeviceQueueCreateFlags::empty(),
+        queue_family_index,
+        queue_count: 1,
+        p_queue_priorities: &queue_priority,
+        _marker: std::marker::PhantomData,
+    };
 
-    let device_create_info = vk::DeviceCreateInfo::builder()
-        .queue_create_infos(&[*queue_create_info]);
+    #[cfg(target_os = "windows")]
+    let device_extension_names = [
+        ash::khr::external_memory::NAME.as_ptr(),
+        ash::khr::external_memory_win32::NAME.as_ptr(),
+        ash::khr::external_semaphore::NAME.as_ptr(),
+        ash::khr::external_semaphore_win32::NAME.as_ptr(),
+        ash::khr::external_fence::NAME.as_ptr(),
+        ash::khr::external_fence_win32::NAME.as_ptr(),
+    ];
+    
+    #[cfg(target_os = "linux")]
+    let device_extension_names = [
+        ash::khr::external_memory::NAME.as_ptr(),
+        ash::khr::external_memory_fd::NAME.as_ptr(),
+        ash::khr::external_semaphore::NAME.as_ptr(),
+        ash::khr::external_semaphore_fd::NAME.as_ptr(),
+        ash::khr::external_fence::NAME.as_ptr(),
+        ash::khr::external_fence_fd::NAME.as_ptr(),
+    ];
+
+    let device_create_info = vk::DeviceCreateInfo {
+        s_type: vk::StructureType::DEVICE_CREATE_INFO,
+        p_next: std::ptr::null(),
+        flags: vk::DeviceCreateFlags::empty(),
+        queue_create_info_count: 1,
+        p_queue_create_infos: &queue_create_info,
+        enabled_layer_count: 0,
+        pp_enabled_layer_names: std::ptr::null(),
+        enabled_extension_count: device_extension_names.len() as u32,
+        pp_enabled_extension_names: device_extension_names.as_ptr(),
+        p_enabled_features: std::ptr::null(),
+        _marker: std::marker::PhantomData,
+    };
 
     let device = unsafe { instance.create_device(physical_device, &device_create_info, None).expect("Failed to create device") };
 
@@ -195,12 +262,121 @@ fn bench_dummy(_c: &mut Criterion) {
 }
 
 #[cfg(feature = "vulkan")]
+fn bench_semaphore_creation(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("semaphore_creation", |b| {
+        b.iter(|| {
+            let semaphore = manager.create_exportable_semaphore()
+                .expect("Failed to create semaphore");
+            black_box(semaphore);
+        });
+    });
+}
+
+#[cfg(feature = "vulkan")]
+fn bench_fence_creation(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("fence_creation", |b| {
+        b.iter(|| {
+            let fence = manager.create_exportable_fence()
+                .expect("Failed to create fence");
+            black_box(fence);
+        });
+    });
+}
+
+#[cfg(all(feature = "vulkan", target_os = "windows"))]
+fn bench_semaphore_export_import(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("semaphore_export_import_win32", |b| {
+        b.iter(|| {
+            let semaphore = manager.create_exportable_semaphore()
+                .expect("Failed to create");
+            let handle = manager.export_semaphore_win32(semaphore)
+                .expect("Failed to export");
+            let imported = manager.import_semaphore_win32(&handle)
+                .expect("Failed to import");
+            manager.release_semaphore(&handle)
+                .expect("Failed to release");
+            black_box(imported);
+        });
+    });
+}
+
+#[cfg(all(feature = "vulkan", target_os = "linux"))]
+fn bench_semaphore_export_import(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("semaphore_export_import_fd", |b| {
+        b.iter(|| {
+            let semaphore = manager.create_exportable_semaphore()
+                .expect("Failed to create");
+            let handle = manager.export_semaphore_fd(semaphore)
+                .expect("Failed to export");
+            let imported = manager.import_semaphore_fd(&handle)
+                .expect("Failed to import");
+            manager.release_semaphore(&handle)
+                .expect("Failed to release");
+            black_box(imported);
+        });
+    });
+}
+
+#[cfg(feature = "vulkan")]
+fn bench_memory_overhead(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    let mut group = c.benchmark_group("memory_overhead");
+    
+    // Compare different texture sizes for memory allocation overhead
+    for size in [512, 1024, 2048, 4096].iter() {
+        let descriptor = TextureDescriptor {
+            width: *size,
+            height: *size,
+            format: TextureFormat::Rgba8Unorm,
+            usage: vec![TextureUsage::TextureBinding],
+            label: Some(format!("MemBench{}x{}", size, size)),
+        };
+        
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                let texture = manager.create_shareable_texture(&descriptor)
+                    .expect("Failed to create");
+                let handle = manager.export_texture(texture.as_ref())
+                    .expect("Failed to export");
+                manager.release_texture_handle(handle)
+                    .expect("Failed to release");
+            });
+        });
+    }
+    
+    group.finish();
+}
+
+#[cfg(feature = "vulkan")]
 criterion_group!(
     benches,
     bench_texture_creation,
     bench_texture_export,
     bench_texture_formats,
-    bench_export_import_roundtrip
+    bench_export_import_roundtrip,
+    bench_semaphore_creation,
+    bench_fence_creation,
+    bench_semaphore_export_import,
+    bench_memory_overhead
 );
 
 #[cfg(not(feature = "vulkan"))]
