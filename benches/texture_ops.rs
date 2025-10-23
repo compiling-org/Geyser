@@ -367,6 +367,143 @@ fn bench_memory_overhead(c: &mut Criterion) {
 }
 
 #[cfg(feature = "vulkan")]
+fn bench_timeline_semaphore_creation(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("timeline_semaphore_creation", |b| {
+        b.iter(|| {
+            let sem = manager.create_exportable_timeline_semaphore(0)
+                .expect("Failed to create");
+            black_box(sem);
+        });
+    });
+}
+
+#[cfg(feature = "vulkan")]
+fn bench_timeline_semaphore_signal_wait(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance.clone(), device.clone(), physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    let semaphore = manager.create_exportable_timeline_semaphore(0)
+        .expect("Failed to create semaphore");
+    
+    c.bench_function("timeline_semaphore_signal_wait", |b| {
+        let mut counter = 1u64;
+        b.iter(|| {
+            manager.signal_timeline_semaphore(semaphore, counter)
+                .expect("Failed to signal");
+            manager.wait_timeline_semaphore(semaphore, counter, u64::MAX)
+                .expect("Failed to wait");
+            counter += 1;
+            black_box(counter);
+        });
+    });
+    
+    unsafe {
+        device.destroy_semaphore(semaphore, None);
+    }
+}
+
+#[cfg(feature = "vulkan")]
+fn bench_timeline_vs_binary_semaphore(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance.clone(), device.clone(), physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    let mut group = c.benchmark_group("semaphore_comparison");
+    
+    // Binary semaphore creation
+    group.bench_function("binary_create", |b| {
+        b.iter(|| {
+            let sem = manager.create_exportable_semaphore()
+                .expect("Failed to create");
+            black_box(sem);
+        });
+    });
+    
+    // Timeline semaphore creation
+    group.bench_function("timeline_create", |b| {
+        b.iter(|| {
+            let sem = manager.create_exportable_timeline_semaphore(0)
+                .expect("Failed to create");
+            black_box(sem);
+        });
+    });
+    
+    group.finish();
+}
+
+#[cfg(feature = "vulkan")]
+fn bench_timeline_semaphore_query(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance.clone(), device.clone(), physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    let semaphore = manager.create_exportable_timeline_semaphore(0)
+        .expect("Failed to create semaphore");
+    
+    manager.signal_timeline_semaphore(semaphore, 100)
+        .expect("Failed to signal");
+    
+    c.bench_function("timeline_semaphore_query", |b| {
+        b.iter(|| {
+            let value = manager.get_timeline_semaphore_value(semaphore)
+                .expect("Failed to query");
+            black_box(value);
+        });
+    });
+    
+    unsafe {
+        device.destroy_semaphore(semaphore, None);
+    }
+}
+
+#[cfg(all(feature = "vulkan", target_os = "windows"))]
+fn bench_timeline_semaphore_export_import(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("timeline_semaphore_export_import_win32", |b| {
+        b.iter(|| {
+            let semaphore = manager.create_exportable_timeline_semaphore(0)
+                .expect("Failed to create");
+            let handle = manager.export_timeline_semaphore_win32(semaphore)
+                .expect("Failed to export");
+            let imported = manager.import_timeline_semaphore_win32(&handle, 0)
+                .expect("Failed to import");
+            manager.release_semaphore(&handle)
+                .expect("Failed to release");
+            black_box(imported);
+        });
+    });
+}
+
+#[cfg(all(feature = "vulkan", target_os = "linux"))]
+fn bench_timeline_semaphore_export_import(c: &mut Criterion) {
+    let (instance, device, physical_device, queue_family_index) = create_vulkan_context();
+    let manager = VulkanTextureShareManager::new(instance, device, physical_device, queue_family_index)
+        .expect("Failed to create manager");
+    
+    c.bench_function("timeline_semaphore_export_import_fd", |b| {
+        b.iter(|| {
+            let semaphore = manager.create_exportable_timeline_semaphore(0)
+                .expect("Failed to create");
+            let handle = manager.export_timeline_semaphore_fd(semaphore)
+                .expect("Failed to export");
+            let imported = manager.import_timeline_semaphore_fd(&handle, 0)
+                .expect("Failed to import");
+            manager.release_semaphore(&handle)
+                .expect("Failed to release");
+            black_box(imported);
+        });
+    });
+}
+
+#[cfg(feature = "vulkan")]
 criterion_group!(
     benches,
     bench_texture_creation,
@@ -376,7 +513,12 @@ criterion_group!(
     bench_semaphore_creation,
     bench_fence_creation,
     bench_semaphore_export_import,
-    bench_memory_overhead
+    bench_memory_overhead,
+    bench_timeline_semaphore_creation,
+    bench_timeline_semaphore_signal_wait,
+    bench_timeline_vs_binary_semaphore,
+    bench_timeline_semaphore_query,
+    bench_timeline_semaphore_export_import
 );
 
 #[cfg(not(feature = "vulkan"))]
