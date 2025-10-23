@@ -40,6 +40,8 @@ pub struct VulkanTextureShareHandle {
 pub struct VulkanSemaphoreHandle {
     pub raw_handle: u64,
     pub handle_type: vk::ExternalSemaphoreHandleTypeFlags,
+    /// If true, this is a timeline semaphore; otherwise it's a binary semaphore
+    pub is_timeline: bool,
 }
 
 /// Vulkan fence handle for synchronization.
@@ -96,6 +98,8 @@ pub struct VulkanTextureShareManager {
     // Store exported sync primitives
     exported_semaphores: Mutex<HashMap<u64, vk::Semaphore>>,
     exported_fences: Mutex<HashMap<u64, vk::Fence>>,
+    // Store timeline semaphore extension if supported
+    timeline_semaphore_supported: bool,
     #[cfg(target_os = "windows")]
     external_memory_win32: ash::khr::external_memory_win32::Device,
     #[cfg(target_os = "linux")]
@@ -144,6 +148,10 @@ impl VulkanTextureShareManager {
         #[cfg(target_os = "linux")]
         let external_fence_fd = ash::khr::external_fence_fd::Device::new(&*instance, &*device);
 
+        // Check if timeline semaphores are supported
+        // Timeline semaphores were promoted to core in Vulkan 1.2
+        let timeline_semaphore_supported = true; // Assume support for now, could query features
+
         Ok(Self {
             instance,
             device,
@@ -153,6 +161,7 @@ impl VulkanTextureShareManager {
             exported_resources: Mutex::new(HashMap::new()),
             exported_semaphores: Mutex::new(HashMap::new()),
             exported_fences: Mutex::new(HashMap::new()),
+            timeline_semaphore_supported,
             #[cfg(target_os = "windows")]
             external_memory_win32,
             #[cfg(target_os = "linux")]
@@ -325,6 +334,7 @@ impl VulkanTextureShareManager {
         Ok(VulkanSemaphoreHandle {
             raw_handle,
             handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_WIN32,
+            is_timeline: false,
         })
     }
 
@@ -350,6 +360,7 @@ impl VulkanTextureShareManager {
         Ok(VulkanSemaphoreHandle {
             raw_handle,
             handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD,
+            is_timeline: false,
         })
     }
 
@@ -537,6 +548,200 @@ impl VulkanTextureShareManager {
         }
 
         Ok(fence)
+    }
+
+    // --- Timeline Semaphore Methods ---
+
+    /// Create an exportable timeline semaphore with an initial counter value
+    pub fn create_exportable_timeline_semaphore(&self, initial_value: u64) -> Result<vk::Semaphore> {
+        if !self.timeline_semaphore_supported {
+            return Err(GeyserError::OperationNotSupported);
+        }
+
+        let handle_types = {
+            #[cfg(target_os = "linux")]
+            { vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD }
+            #[cfg(target_os = "windows")]
+            { vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_WIN32 }
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            { vk::ExternalSemaphoreHandleTypeFlags::empty() }
+        };
+
+        let mut export_semaphore_info = vk::ExportSemaphoreCreateInfo {
+            s_type: vk::StructureType::EXPORT_SEMAPHORE_CREATE_INFO,
+            p_next: std::ptr::null(),
+            handle_types,
+            _marker: std::marker::PhantomData,
+        };
+
+        let mut timeline_create_info = vk::SemaphoreTypeCreateInfo {
+            s_type: vk::StructureType::SEMAPHORE_TYPE_CREATE_INFO,
+            p_next: &mut export_semaphore_info as *mut _ as *const std::ffi::c_void,
+            semaphore_type: vk::SemaphoreType::TIMELINE,
+            initial_value,
+            _marker: std::marker::PhantomData,
+        };
+
+        let semaphore_create_info = vk::SemaphoreCreateInfo {
+            s_type: vk::StructureType::SEMAPHORE_CREATE_INFO,
+            p_next: &mut timeline_create_info as *mut _ as *const std::ffi::c_void,
+            flags: vk::SemaphoreCreateFlags::empty(),
+            _marker: std::marker::PhantomData,
+        };
+
+        unsafe {
+            self.device.create_semaphore(&semaphore_create_info, None)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to create timeline semaphore: {:?}", e)))
+        }
+    }
+
+    /// Export a timeline semaphore handle for sharing (Windows)
+    #[cfg(target_os = "windows")]
+    pub fn export_timeline_semaphore_win32(&self, semaphore: vk::Semaphore) -> Result<VulkanSemaphoreHandle> {
+        let get_handle_info = vk::SemaphoreGetWin32HandleInfoKHR {
+            s_type: vk::StructureType::SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR,
+            p_next: std::ptr::null(),
+            semaphore,
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_WIN32,
+            _marker: std::marker::PhantomData,
+        };
+
+        let raw_handle = unsafe {
+            self.external_semaphore_win32
+                .get_semaphore_win32_handle(&get_handle_info)
+                .map(|h| h as u64)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to export timeline semaphore: {:?}", e)))?
+        };
+
+        self.exported_semaphores.lock().unwrap().insert(raw_handle, semaphore);
+
+        Ok(VulkanSemaphoreHandle {
+            raw_handle,
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_WIN32,
+            is_timeline: true,
+        })
+    }
+
+    /// Export a timeline semaphore handle for sharing (Linux)
+    #[cfg(target_os = "linux")]
+    pub fn export_timeline_semaphore_fd(&self, semaphore: vk::Semaphore) -> Result<VulkanSemaphoreHandle> {
+        let get_fd_info = vk::SemaphoreGetFdInfoKHR {
+            s_type: vk::StructureType::SEMAPHORE_GET_FD_INFO_KHR,
+            p_next: std::ptr::null(),
+            semaphore,
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD,
+            _marker: std::marker::PhantomData,
+        };
+
+        let raw_handle = unsafe {
+            self.external_semaphore_fd
+                .get_semaphore_fd(&get_fd_info)
+                .map(|fd| fd as u64)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to export timeline semaphore: {:?}", e)))?
+        };
+
+        self.exported_semaphores.lock().unwrap().insert(raw_handle, semaphore);
+
+        Ok(VulkanSemaphoreHandle {
+            raw_handle,
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD,
+            is_timeline: true,
+        })
+    }
+
+    /// Import a timeline semaphore from an external handle (Windows)
+    #[cfg(target_os = "windows")]
+    pub fn import_timeline_semaphore_win32(&self, handle: &VulkanSemaphoreHandle, initial_value: u64) -> Result<vk::Semaphore> {
+        let mut import_info = vk::ImportSemaphoreWin32HandleInfoKHR {
+            s_type: vk::StructureType::IMPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR,
+            p_next: std::ptr::null(),
+            semaphore: vk::Semaphore::null(),
+            flags: vk::SemaphoreImportFlags::empty(),
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_WIN32,
+            handle: handle.raw_handle as isize,
+            name: std::ptr::null(),
+            _marker: std::marker::PhantomData,
+        };
+
+        // First create the timeline semaphore
+        let semaphore = self.create_exportable_timeline_semaphore(initial_value)?;
+        import_info.semaphore = semaphore;
+
+        unsafe {
+            self.external_semaphore_win32
+                .import_semaphore_win32_handle(&import_info)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to import timeline semaphore: {:?}", e)))?;
+        }
+
+        Ok(semaphore)
+    }
+
+    /// Import a timeline semaphore from an external handle (Linux)
+    #[cfg(target_os = "linux")]
+    pub fn import_timeline_semaphore_fd(&self, handle: &VulkanSemaphoreHandle, initial_value: u64) -> Result<vk::Semaphore> {
+        let mut import_info = vk::ImportSemaphoreFdInfoKHR {
+            s_type: vk::StructureType::IMPORT_SEMAPHORE_FD_INFO_KHR,
+            p_next: std::ptr::null(),
+            semaphore: vk::Semaphore::null(),
+            flags: vk::SemaphoreImportFlags::empty(),
+            handle_type: vk::ExternalSemaphoreHandleTypeFlags::OPAQUE_FD,
+            fd: handle.raw_handle as i32,
+            _marker: std::marker::PhantomData,
+        };
+
+        // First create the timeline semaphore
+        let semaphore = self.create_exportable_timeline_semaphore(initial_value)?;
+        import_info.semaphore = semaphore;
+
+        unsafe {
+            self.external_semaphore_fd
+                .import_semaphore_fd(&import_info)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to import timeline semaphore: {:?}", e)))?;
+        }
+
+        Ok(semaphore)
+    }
+
+    /// Signal a timeline semaphore to a specific value from the host
+    pub fn signal_timeline_semaphore(&self, semaphore: vk::Semaphore, value: u64) -> Result<()> {
+        let signal_info = vk::SemaphoreSignalInfo {
+            s_type: vk::StructureType::SEMAPHORE_SIGNAL_INFO,
+            p_next: std::ptr::null(),
+            semaphore,
+            value,
+            _marker: std::marker::PhantomData,
+        };
+
+        unsafe {
+            self.device.signal_semaphore(&signal_info)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to signal timeline semaphore: {:?}", e)))
+        }
+    }
+
+    /// Wait for a timeline semaphore to reach a specific value from the host
+    pub fn wait_timeline_semaphore(&self, semaphore: vk::Semaphore, value: u64, timeout_ns: u64) -> Result<()> {
+        let wait_info = vk::SemaphoreWaitInfo {
+            s_type: vk::StructureType::SEMAPHORE_WAIT_INFO,
+            p_next: std::ptr::null(),
+            flags: vk::SemaphoreWaitFlags::empty(),
+            semaphore_count: 1,
+            p_semaphores: &semaphore,
+            p_values: &value,
+            _marker: std::marker::PhantomData,
+        };
+
+        unsafe {
+            self.device.wait_semaphores(&wait_info, timeout_ns)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to wait on timeline semaphore: {:?}", e)))
+        }
+    }
+
+    /// Get the current counter value of a timeline semaphore
+    pub fn get_timeline_semaphore_value(&self, semaphore: vk::Semaphore) -> Result<u64> {
+        unsafe {
+            self.device.get_semaphore_counter_value(semaphore)
+                .map_err(|e| GeyserError::VulkanApiError(format!("Failed to get timeline semaphore value: {:?}", e)))
+        }
     }
 
     /// Cleanup exported semaphore
