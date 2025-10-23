@@ -84,16 +84,25 @@ manager.release_texture_handle(handle)?;
 
 See the [`examples/`](examples/) directory for comprehensive demonstrations:
 
+**Phase 1 - Basic Sharing:**
 - **`vulkan_to_vulkan.rs`**: Vulkan texture sharing between contexts
 - **`metal_to_metal.rs`**: Metal IOSurface-based sharing (macOS)
 - **`bevy_integration.rs`**: Integration with Bevy game engine
-- **`vulkan_to_metal.rs`**: Cross-API sharing (Phase 2)
+
+**Phase 2 - Cross-Process IPC:**
+- **`ipc_producer.rs`** & **`ipc_consumer.rs`**: Multi-process texture sharing with binary semaphores
+- **`timeline_semaphore_pipeline.rs`**: Frame pipelining with timeline semaphores
+- **`timeline_ipc_producer.rs`** & **`timeline_ipc_consumer.rs`**: Multi-process with timeline semaphores
 
 Run examples with:
 ```bash
+# Single process
 cargo run --example vulkan_to_vulkan --features vulkan
-cargo run --example metal_to_metal --features metal
-cargo run --example bevy_integration --features vulkan  # or metal on macOS
+cargo run --example timeline_semaphore_pipeline --features vulkan
+
+# Multi-process (run in separate terminals)
+cargo run --example ipc_producer --features vulkan
+cargo run --example ipc_consumer --features vulkan
 ```
 
 See [`examples/README.md`](examples/README.md) for detailed usage instructions.
@@ -118,12 +127,12 @@ The modern graphics landscape often involves multiple applications or components
 *   ✅ Comprehensive test coverage
 *   ✅ Documentation and examples
 
-### 🚧 Phase 2: Cross-API Sharing (Planned)
-*   ⚪ Vulkan ↔ Metal sharing on macOS via MoltenVK
-*   ⚪ True zero-copy Bevy engine integration
-*   ⚪ Real cross-process IPC examples
-*   ⚪ Timeline semaphores for advanced synchronization
-*   ⚪ Performance benchmarks and optimization
+### ✅ Phase 2: Cross-API Sharing (80% Complete)
+*   ✅ **Real cross-process IPC examples** - Producer/consumer with binary & timeline semaphores
+*   ✅ **Timeline semaphores** - Counter-based synchronization for advanced pipelines
+*   ✅ **Performance benchmarks** - Comprehensive criterion-based benchmark suite
+*   🔄 **Bevy engine integration** - Plugin foundation complete (wgpu-hal bridge remains for Phase 3)
+*   ⚪ **Vulkan ↔ Metal sharing** - Requires macOS development environment
 
 ### 🔵 Phase 3: WebGPU Integration (Future)
 *   ⚪ WebGPU backend for import/export
