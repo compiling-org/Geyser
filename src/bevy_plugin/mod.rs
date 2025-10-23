@@ -20,19 +20,21 @@
 //!     .run();
 //! ```
 
+mod wgpu_bridge;
+pub use wgpu_bridge::{WgpuTextureHandle, WgpuBackendType};
+
 use bevy::prelude::*;
 use bevy::render::{
     RenderApp,
     extract_resource::ExtractResource,
-    renderer::RenderDevice,
 };
+use bevy::render::Extract;
 use std::sync::Arc;
 
 #[cfg(feature = "vulkan")]
 use crate::{
     vulkan::VulkanTextureShareManager,
     common::{ApiTextureHandle, TextureDescriptor},
-    SharedTexture,
 };
 
 /// Bevy plugin for Geyser texture sharing
@@ -141,12 +143,11 @@ fn process_shared_texture_events(
             }
         };
         
-        let image = Image::new_fill(
-            size,
-            bevy::render::render_resource::TextureDimension::D2,
-            &[0, 0, 0, 255],
-            format,
-        );
+        let mut image = Image::default();
+        image.texture_descriptor.size = size;
+        image.texture_descriptor.dimension = bevy::render::render_resource::TextureDimension::D2;
+        image.texture_descriptor.format = format;
+        image.data = vec![0; (size.width * size.height * 4) as usize];
         
         let image_handle = images.add(image);
         
@@ -188,8 +189,8 @@ fn cleanup_expired_textures(
 
 /// Extract system to move Geyser state to render world
 fn extract_geyser_textures(
-    state: Extract<Res<GeyserState>>,
-    mut render_state: ResMut<GeyserRenderState>,
+    _state: Extract<Res<GeyserState>>,
+    _render_state: ResMut<GeyserRenderState>,
 ) {
     // TODO: Extract texture handles and prepare for rendering
 }

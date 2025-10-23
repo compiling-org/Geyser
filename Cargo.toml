@@ -22,11 +22,15 @@ core-graphics = { version = "0.23", optional = true } # For common CoreGraphics 
 
 # WebGPU dependencies (for the webgpu backend - future)
 # wgpu = { version = "0.19", optional = true }
+wgpu-hal = { version = "27", optional = true }
+wgpu-types = { version = "27", optional = true }
+
+# Bevy integration dependencies
+bevy = { version = "0.14", default-features = false, features = ["bevy_asset", "bevy_render", "bevy_winit", "bevy_core_pipeline", "bevy_sprite", "png", "x11"], optional = true }
 
 [dev-dependencies]
 # For testing and examples
 anyhow = "1.0" # Simple error handling in examples
-bevy = { version = "0.14", default-features = false, features = ["bevy_asset", "bevy_render", "bevy_winit", "bevy_core_pipeline", "bevy_sprite", "png", "x11"] }
 criterion = "0.5" # Benchmarking
 serde = { version = "1.0", features = ["derive"] } # Serialization for IPC
 bincode = "1.3" # Binary serialization for IPC
@@ -40,4 +44,4 @@ default = []
 vulkan = ["dep:ash", "dep:gpu-allocator"]
 metal = ["dep:metal", "dep:core-graphics"]
 webgpu = [] # Add ["dep:wgpu"] when starting WebGPU implementation
-bevy = [] # Enables Bevy plugin (requires bevy in dev-dependencies)
+bevy = ["dep:bevy", "dep:wgpu-hal", "dep:wgpu-types"] # Enables Bevy plugin with wgpu-hal bridge

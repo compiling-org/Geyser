@@ -16,6 +16,10 @@ pub enum GeyserError {
     MetalApiError(String),
     #[error("Unsupported texture format: {0}")]
     UnsupportedTextureFormat(String),
+    #[error("Unsupported format: {0}")]
+    UnsupportedFormat(String),
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
     #[error("Invalid handle provided for import/export")]
     InvalidTextureHandle,
     #[error("Resource already in use or cannot be shared")]
