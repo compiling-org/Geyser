@@ -134,16 +134,20 @@ The modern graphics landscape often involves multiple applications or components
 *   🔄 **Bevy engine integration** - Plugin foundation complete (wgpu-hal bridge remains for Phase 3)
 *   ⚪ **Vulkan ↔ Metal sharing** - Requires macOS development environment
 
-### 🔵 Phase 3: WebGPU Integration (Future)
-*   ⚪ WebGPU backend for import/export
-*   ⚪ Cross-API sharing involving WebGPU
-*   ⚪ Web platform support
+### 🔵 Phase 3: WebGPU Integration & Bevy Completion (Future)
+*   ⚪ **wgpu-hal bridge** - Complete Bevy zero-copy integration
+*   ⚪ **Bevy multi-window example** - Shared textures across windows
+*   ⚪ **Bevy multi-process game** - Physics/render process separation
+*   ⚪ **WebGPU backend** - Import/export for wgpu
+*   ⚪ **Cross-API sharing** - Vulkan ↔ WebGPU, Metal ↔ WebGPU
+*   ⚪ **Web platform support** - Browser-based texture sharing
 
 ### ⚪ Phase 4: Advanced Features (Future)
-*   ⚪ Compressed texture format support
-*   ⚪ Texture arrays and 3D textures
-*   ⚪ Multi-GPU scenarios
-*   ⚪ Additional graphics library integrations
+*   ⚪ **Compressed texture formats** - BC, ASTC, ETC2 support
+*   ⚪ **Texture arrays** - 2D array and cube map sharing
+*   ⚪ **3D textures** - Volume texture support
+*   ⚪ **Multi-GPU scenarios** - Explicit device selection and transfer
+*   ⚪ **Additional integrations** - wgpu, three-d, rend3, etc.
 
 ## 👋 Contributing
 
